@@ -1,0 +1,6 @@
+ftpuser password123
+admin   adminpass
+guest   guestpass
+john    johndoe123
+alice   alicepass
+1 1
