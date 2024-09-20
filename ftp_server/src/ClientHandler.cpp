@@ -32,15 +32,15 @@ ClientHandler::ClientHandler(
 
 ClientHandler::~ClientHandler()
 {
-    ACE_DEBUG(
-            (LM_DEBUG,
-             "(Thread ID: %t) ~ClientHandler: Cleaning up resources.\n"));
+    // ACE_DEBUG(
+    //         (LM_DEBUG,
+    //          "(Thread ID: %t) ~ClientHandler: Cleaning up resources.\n"));
 }
 
 int ClientHandler::open()
 {
-    ACE_DEBUG(
-            (LM_DEBUG, "(Thread ID: %t) Registering handler with reactor.\n"));
+    // ACE_DEBUG(
+    //         (LM_DEBUG, "(Thread ID: %t) Registering handler with reactor.\n"));
     // 发送 220 响应，告诉客户端服务器已准备好
     std::string response = "220 Service ready for new user.\r\n";
     ssize_t bytesSent = clientStream_.send(response.c_str(), response.size());
@@ -86,7 +86,7 @@ int ClientHandler::handle_close(
     if (is_closed_) {
         return 0; // 防止多次调用 handle_close()
     }
-    ACE_DEBUG((LM_DEBUG, ACE_TEXT("(%P|%t) Closing client connection.\n")));
+    // ACE_DEBUG((LM_DEBUG, ACE_TEXT("(%P|%t) Closing client connection.\n")));
     // 标记连接已关闭，防止重复关闭
     is_closed_ = true;
     // 关闭客户端的 socket 连接
@@ -99,16 +99,16 @@ int ClientHandler::handle_close(
     }
     // 使用 ACE_Reactor::notify() 延迟释放资源，调用 handle_exception()
     ACE_Reactor::instance()->notify(this, ACE_Event_Handler::EXCEPT_MASK);
-    ACE_DEBUG(
-            (LM_DEBUG,
-             ACE_TEXT("(%P|%t) Safely deleting the client handler.\n")));
+    // ACE_DEBUG(
+    //         (LM_DEBUG,
+    //          ACE_TEXT("(%P|%t) Safely deleting the client handler.\n")));
     clientStream_.close();
 }
 int ClientHandler::handle_exception(ACE_HANDLE /*fd*/)
 {
-    ACE_DEBUG(
-            (LM_DEBUG,
-             ACE_TEXT("(%P|%t) Safely deleting the client handler.\n")));
+    // ACE_DEBUG(
+    //         (LM_DEBUG,
+    //          ACE_TEXT("(%P|%t) Safely deleting the client handler.\n")));
     delete this; // 安全地删除 ClientHandler 对象
     return 0;
 }

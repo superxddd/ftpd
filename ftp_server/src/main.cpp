@@ -126,10 +126,10 @@ int main(int argc, char* argv[])
     }
 
     // 启动主 Reactor 的事件循环
-    ACE_DEBUG((
-            LM_DEBUG,
-            "Server started on port %d, with %d reactor workers and %d thread pool threads.\n",
-            port, num_workers, num_threadpool_threads));
+    // ACE_DEBUG((
+    //         LM_DEBUG,
+    //         "Server started on port %d, with %d reactor workers and %d thread pool threads.\n",
+    //         port, num_workers, num_threadpool_threads));
     ACE_Reactor::instance()->run_reactor_event_loop();
 
     // 确保所有线程和资源在关闭时正确处理

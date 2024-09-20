@@ -2,11 +2,18 @@
 #include <ace/Log_Msg.h>
 #include <fstream>
 #include <sstream>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <random>
 #include <list>
 #include <sys/stat.h>
 #include <ace/Message_Block.h>
 #include <dirent.h>
+
+// 定义每个传输块的大小
+const size_t CHUNK_SIZE = 65536;          // 64KB
+const size_t SMALL_FILE_THRESHOLD = 8192; // 小文件的阈值，8KB
 
 // 构造函数
 FileCommand::FileCommand(): dataAcceptor_(), dataStream_() {}
@@ -68,8 +75,9 @@ void FileCommand::handle_pasv(Session& session, ACE_SOCK_Stream& clientStream_)
         serverAddr.set_port_number(distrib(gen));
         char addr_str[128] = {0};
         serverAddr.addr_to_string(addr_str, sizeof(addr_str));
-        ACE_DEBUG(
-                (LM_DEBUG, "Trying to open passive mode on [%s]\n", addr_str));
+        // ACE_DEBUG(
+        //         (LM_DEBUG, "Trying to open passive mode on [%s]\n",
+        //         addr_str));
 
         // 绑定到随机端口并监听
         if (dataAcceptor_.open(serverAddr) != -1) {
@@ -118,9 +126,9 @@ void FileCommand::handle_pasv(Session& session, ACE_SOCK_Stream& clientStream_)
              << "," << p2 << ").\r\n";
     clientStream_.send(response.str().c_str(), response.str().size());
 
-    ACE_DEBUG(
-            (LM_DEBUG, "Server in passive mode on IP %s and port %d\n",
-             serverAddr.get_host_addr(), port));
+    // ACE_DEBUG(
+    //         (LM_DEBUG, "Server in passive mode on IP %s and port %d\n",
+    //          serverAddr.get_host_addr(), port));
 
     // 标记进入被动模式
     passive_mode_ = true;
@@ -157,13 +165,14 @@ void FileCommand::handle_type(
                 (LM_ERROR,
                  ACE_TEXT("(%P|%t) Failed to send TYPE response to client\n")));
     } else {
-        ACE_DEBUG(
-                (LM_DEBUG,
-                 ACE_TEXT("(%P|%t) Sent %zd bytes TYPE response to client\n"),
-                 bytesSent));
+        // ACE_DEBUG(
+        //         (LM_DEBUG,
+        //          ACE_TEXT("(%P|%t) Sent %zd bytes TYPE response to
+        //          client\n"), bytesSent));
     }
 }
 
+//STOR命令
 void FileCommand::handle_stor(
         Session& session,
         const std::string& params,
@@ -191,97 +200,87 @@ void FileCommand::handle_stor(
 
         std::string fileName = params;
 
-        // 打开文件以进行写入
-        std::ofstream outputFile(fileName, std::ios::binary);
-        if (!outputFile.is_open()) {
-            std::string response = "550 Failed to open file for writing.\r\n";
-            clientStream_.send(response.c_str(), response.size());
-            return;
-        }
-
+        // 接收数据并将其存储到临时缓冲区
         const size_t bufferSize = 65536; // 64KB buffer
         char buffer[bufferSize];
         ssize_t bytesReceived = 0;
+        size_t totalBytesReceived = 0;
 
-        // 设置超时时间为 30 秒
-        ACE_Time_Value timeout(30);
-        dataStream_.set_option(
-                SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+        std::vector<char> fileData;
 
-        if (session.get_transfer_mode() == BINARY) {
-            // 二进制模式：直接接收并写入文件
-            while (true) {
-                bytesReceived = dataStream_.recv(buffer, bufferSize);
-                std::cout << "buffer:" << buffer << std::endl;
-
-                if (bytesReceived > 0) {
-                    outputFile.write(buffer, bytesReceived);
-                    if (outputFile.fail()) {
-                        std::string response =
-                                "550 Failed to write to file.\r\n";
-                        clientStream_.send(response.c_str(), response.size());
-                        outputFile.close();
-                        dataStream_.close();
-                        return;
-                    }
-                } else if (bytesReceived == 0) {
-                    // 连接关闭
-                    break;
-                } else {
-                    // 发生错误或超时
-                    std::string response =
-                            "426 Transfer aborted due to connection error or timeout.\r\n";
-                    clientStream_.send(response.c_str(), response.size());
-                    outputFile.close();
-                    dataStream_.close();
-                    return;
-                }
-            }
-        } else if (session.get_transfer_mode() == ASCII) {
-            // ASCII 模式：逐行接收并写入文件
-            std::string line;
-            while (true) {
-                bytesReceived = dataStream_.recv(buffer, bufferSize);
-                std::cout << "buffer:" << buffer << std::endl;
-
-                if (bytesReceived > 0) {
-                    std::string data(buffer, bytesReceived);
-                    outputFile << data; // 直接将数据写入文件
-                    if (outputFile.fail()) {
-                        std::string response =
-                                "550 Failed to write to file.\r\n";
-                        clientStream_.send(response.c_str(), response.size());
-                        outputFile.close();
-                        dataStream_.close();
-                        return;
-                    }
-                } else if (bytesReceived == 0) {
-                    // 连接关闭
-                    break;
-                } else {
-                    // 发生错误或超时
-                    std::string response =
-                            "426 Transfer aborted due to connection error or timeout.\r\n";
-                    clientStream_.send(response.c_str(), response.size());
-                    outputFile.close();
-                    dataStream_.close();
-                    return;
-                }
-            }
+        // 循环接收数据，直到客户端关闭连接
+        while ((bytesReceived = dataStream_.recv(buffer, bufferSize)) > 0) {
+            totalBytesReceived += bytesReceived;
+            fileData.insert(fileData.end(), buffer, buffer + bytesReceived);
         }
 
-        // 传输完成
+        // 如果数据量小于 SMALL_FILE_THRESHOLD，则直接写入文件
+        if (totalBytesReceived <= SMALL_FILE_THRESHOLD) {
+            // 打开文件以进行写入
+            std::ofstream outputFile(fileName, std::ios::binary);
+            if (!outputFile.is_open()) {
+                std::string response = "550 Failed to open file for writing.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                return;
+            }
+
+            // 直接将数据写入文件
+            outputFile.write(fileData.data(), totalBytesReceived);
+            if (outputFile.fail()) {
+                std::string response = "550 Failed to write to file.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                outputFile.close();
+                return;
+            }
+
+            outputFile.close();
+        } else {
+            // 如果是大文件，则使用 mmap 方式进行写入
+            int fd = open(fileName.c_str(), O_RDWR | O_CREAT, 0644);
+            if (fd == -1) {
+                std::string response = "550 Failed to open file for writing.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                return;
+            }
+
+            // 将文件扩展到总接收数据大小
+            if (ftruncate(fd, totalBytesReceived) == -1) {
+                std::string response = "550 Failed to resize file.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                close(fd);
+                return;
+            }
+
+            // 使用 mmap 将文件映射到内存
+            void* fileMappedData = mmap(NULL, totalBytesReceived, PROT_WRITE, MAP_SHARED, fd, 0);
+            if (fileMappedData == MAP_FAILED) {
+                std::string response = "550 Failed to mmap file.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                close(fd);
+                return;
+            }
+
+            // 将数据拷贝到 mmap 映射的内存中
+            memcpy(fileMappedData, fileData.data(), totalBytesReceived);
+
+            // 解除 mmap 映射
+            munmap(fileMappedData, totalBytesReceived);
+
+            // 关闭文件
+            close(fd);
+        }
+
+        // 发送传输完成的响应
         std::string response = "226 Transfer complete.\r\n";
         clientStream_.send(response.c_str(), response.size());
 
-        // 关闭文件和数据流
-        outputFile.close();
-        dataStream_.close();
+        // 清理被动模式资源
         clear_passive_mode();
     });
 }
 
-// 处理 RETR 命令
+
+//处理RETR
 void FileCommand::handle_retr(
         Session& session,
         const std::string& params,
@@ -310,55 +309,87 @@ void FileCommand::handle_retr(
             return;
         }
 
-        // 打开文件以进行读取
-        std::ifstream inputFile(fileName, std::ios::binary);
-        if (!inputFile.is_open()) {
+        // 打开文件并获取文件大小
+        int fd = open(fileName.c_str(), O_RDONLY);
+        if (fd == -1) {
             std::string response = "550 Failed to open file.\r\n";
             clientStream_.send(response.c_str(), response.size());
             return;
         }
 
+        struct stat fileStat;
+        if (fstat(fd, &fileStat) == -1) {
+            std::string response = "550 Failed to get file size.\r\n";
+            clientStream_.send(response.c_str(), response.size());
+            close(fd);
+            return;
+        }
+
+        size_t fileSize = fileStat.st_size;
+
         // 发送 150 响应，通知客户端即将开始文件传输
         std::string response150 = "150 Opening data connection.\r\n";
         clientStream_.send(response150.c_str(), response150.size());
 
-        const size_t bufferSize = 65536; // 64KB buffer
-        char buffer[bufferSize];
         ssize_t bytesSent = 0;
 
-        // 根据传输模式（BINARY 或 ASCII）处理文件传输
-        if (session.get_transfer_mode() == BINARY) {
-            // 二进制模式：直接读取并发送
-            while (inputFile.read(buffer, bufferSize) ||
-                   inputFile.gcount() > 0) {
-                std::streamsize bytesRead = inputFile.gcount();
-                bytesSent = dataStream_.send(buffer, bytesRead);
+        if (fileSize <= SMALL_FILE_THRESHOLD) {
+            // 对于小文件，直接读取整个文件到内存并一次性发送
+            char* fileData = new char[fileSize];
+            if (read(fd, fileData, fileSize) !=
+                static_cast<ssize_t>(fileSize)) {
+                std::string response = "550 Failed to read file.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                delete[] fileData;
+                close(fd);
+                return;
+            }
+
+            bytesSent = dataStream_.send_n(fileData, fileSize);
+            delete[] fileData;
+            if (bytesSent == -1) {
+                std::string response =
+                        "426 Transfer aborted: Connection closed.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                close(fd);
+                return;
+            }
+        } else {
+            // 对于大文件，使用 mmap 和分块传输
+            void* fileData =
+                    mmap(NULL, fileSize, PROT_READ, MAP_PRIVATE, fd, 0);
+            if (fileData == MAP_FAILED) {
+                std::string response = "550 Failed to mmap file.\r\n";
+                clientStream_.send(response.c_str(), response.size());
+                close(fd);
+                return;
+            }
+
+            size_t offset = 0;
+            while (offset < fileSize) {
+                size_t bytesToSend = std::min(CHUNK_SIZE, fileSize - offset);
+
+                // 从内存中发送当前块
+                bytesSent = dataStream_.send_n(
+                        (char*)fileData + offset, bytesToSend);
                 if (bytesSent == -1) {
                     std::string response =
                             "426 Transfer aborted: Connection closed.\r\n";
                     clientStream_.send(response.c_str(), response.size());
-                    inputFile.close();
+                    munmap(fileData, fileSize);
+                    close(fd);
                     return;
                 }
+
+                offset += bytesToSend;
             }
-        } else if (session.get_transfer_mode() == ASCII) {
-            // ASCII 模式：逐行读取并发送
-            std::string line;
-            while (std::getline(inputFile, line)) {
-                line += "\r\n"; // 添加 CRLF
-                bytesSent = dataStream_.send(line.c_str(), line.size());
-                if (bytesSent == -1) {
-                    std::string response =
-                            "426 Transfer aborted: Connection closed.\r\n";
-                    clientStream_.send(response.c_str(), response.size());
-                    inputFile.close();
-                    return;
-                }
-            }
+
+            // 释放 mmap 的内存映射
+            munmap(fileData, fileSize);
         }
 
-        // 检查文件传输是否完成
-        if (inputFile.eof()) {
+        // 检查传输是否成功完成
+        if (bytesSent != -1) {
             std::string response = "226 Transfer complete.\r\n";
             clientStream_.send(response.c_str(), response.size());
         } else {
@@ -366,8 +397,10 @@ void FileCommand::handle_retr(
             clientStream_.send(response.c_str(), response.size());
         }
 
-        // 关闭文件流和数据连接
-        inputFile.close();
+        // 关闭文件描述符
+        close(fd);
+
+        // 关闭数据连接
         dataStream_.close();
         clear_passive_mode();
     });

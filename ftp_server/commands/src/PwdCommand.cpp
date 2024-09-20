@@ -32,9 +32,9 @@ void PwdCommand::execute(
                 (LM_ERROR,
                  ACE_TEXT("(%P|%t) Failed to send PWD response to client\n")));
     } else {
-        ACE_DEBUG(
-                (LM_DEBUG,
-                 ACE_TEXT("(%P|%t) Sent %d bytes PWD response to client\n"),
-                 bytesSent));
+        // ACE_DEBUG(
+        //         (LM_DEBUG,
+        //          ACE_TEXT("(%P|%t) Sent %d bytes PWD response to client\n"),
+        //          bytesSent));
     }
 }

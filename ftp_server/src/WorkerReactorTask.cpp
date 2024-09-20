@@ -31,9 +31,9 @@ int WorkerReactorTask::svc()
     // 动态分配 Reactor，确保其生命周期与 WorkerReactorTask 绑定
     reactor_ = new ACE_Reactor();
 
-    ACE_DEBUG(
-            (LM_DEBUG,
-             "(Reactor Thread ID: %t) Reactor event loop starting.\n"));
+    // ACE_DEBUG(
+    //         (LM_DEBUG,
+    //          "(Reactor Thread ID: %t) Reactor event loop starting.\n"));
 
     // 启动事件循环
     reactor_->run_reactor_event_loop();

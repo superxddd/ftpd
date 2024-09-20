@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # 找到 GTest 和 GMock
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
-
+find_package(OpenSSL REQUIRED)
 
 # 包含项目头文件目录
 include_directories(${PROJECT_SOURCE_DIR}/../include)
@@ -37,12 +37,7 @@ set(PROJECT_SOURCES
 # 添加测试源文件
 set(TEST_SOURCES
     ${PROJECT_SOURCE_DIR}/c_main.cpp
-    ${PROJECT_SOURCE_DIR}/pwd_test.cpp
-    ${PROJECT_SOURCE_DIR}/user_test.cpp
-    ${PROJECT_SOURCE_DIR}/cwd_test.cpp
-    ${PROJECT_SOURCE_DIR}/file_test.cpp
-    ${PROJECT_SOURCE_DIR}/data_test.cpp
-    ${PROJECT_SOURCE_DIR}/Unknowcommand_test
+    ${PROJECT_SOURCE_DIR}/FTPServerTests.cpp
     )
 
 
@@ -50,7 +45,7 @@ set(TEST_SOURCES
 add_executable(ftp_server_test_suite ${TEST_SOURCES} ${PROJECT_SOURCES})
 
 # 链接 GoogleTest 库和 pthread 库
-target_link_libraries(ftp_server_test_suite GTest::gtest_main ACE GTest::gmock pthread)
+target_link_libraries(ftp_server_test_suite GTest::gtest_main ACE GTest::gmock pthread OpenSSL::SSL OpenSSL::Crypto)
 
 # 启用测试
 enable_testing()
